@@ -5,4 +5,4 @@ Project Overview - 
 The AWS Network Access Analyzer project aims to provide a comprehensive understanding and practical demonstration of the Network Access Analyzer (NAA) feature within Amazon VPC.
 This lab will equip participants with the knowledge and skills to effectively assess, verify, and improve their VPC network security posture.
 
-![image](https://github.com/user-attachments/assets/0411d86e-a6bd-4c17-ac05-848b80afd63f)
+![Architecture-Final](https://github.com/user-attachments/assets/f0b9a5a7-e149-4e3f-8043-87f586dafe22)
