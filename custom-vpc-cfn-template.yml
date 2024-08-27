@@ -1,0 +1,361 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Build 3 VPC and EC2 Instances in Single Region 
+Mappings:
+  VPCmapping:
+    me-south-1:
+      cidr2: 10.20.0.0/16
+      privateSubnetCidr2: 10.20.1.0/24
+      publicSubnetCidr2: 10.20.10.0/24
+      Name2: VPC2
+      privateSubnetName2: VPC2-PRIVATE-subnet
+      publicSubnetName2: VPC2-PUBLIC-subnet
+      2server1: VPC2-private-ec2
+      securityGroup2: VPC2-security-group
+      publicRT2: VPC2-PUBLIC-RouteTable
+      privateRT2: VPC2-PRIVATE-RouteTable
+      cidr3: 10.30.0.0/16
+      publicSubnetCidr3: 10.30.10.0/24
+      Name3: VPC3
+      publicSubnetName3: VPC3-PUBLIC-subnet
+      3server2: VPC3-public-ec2
+      securityGroup3: VPC3-security-group
+      publicRT3: VPC3-PUBLIC-RouteTable
+
+Parameters:
+  AWSAmiId:
+    Description: Fetch latest Linux AMI ID 
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+
+Resources:
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: 10.10.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: VPC1
+
+  PrivateSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.10.1.0/24
+      AvailabilityZone: !Select
+        - '0'
+        - !GetAZs ''
+      Tags:
+        - Key: Name
+          Value: VPC1-PRIVATE-subnet
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: VPC1-PRIVATE-RouteTable
+
+  PrivateRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security Group for EC2Instance
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: VPC1-security-group
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 49421
+          ToPort: 49421
+          CidrIp: 0.0.0.0/0
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 49421
+          ToPort: 49421
+          CidrIp: 0.0.0.0/0
+
+  FirstEC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:  
+      ImageId: !Ref AWSAmiId
+      InstanceType: t3.micro
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          AssociatePublicIpAddress: false
+          SubnetId: !Ref PrivateSubnet
+          GroupSet:
+            - !Ref SecurityGroup
+      Tags:
+        - Key: Name
+          Value: VPC1-private-ec2
+
+  VPC2:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: !FindInMap [ VPCmapping, !Ref "AWS::Region", cidr2 ]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !FindInMap [ VPCmapping, !Ref "AWS::Region", Name2 ]
+
+  InternetGateway2:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC2
+    Properties:
+      Tags:
+        - Key: Name
+          Value: VPC2-internet-gateway
+
+  AttachGateway2:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC2
+      InternetGatewayId: !Ref InternetGateway2
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    DependsOn: AttachGateway2
+    Properties:
+      VpcId: !Ref VPC2
+      CidrBlock: !FindInMap [ VPCmapping, !Ref "AWS::Region", publicSubnetCidr2 ]
+      AvailabilityZone: !Select [ 1, !GetAZs ]       
+      Tags:
+      - Key: Name
+        Value: !FindInMap [ VPCmapping, !Ref "AWS::Region", publicSubnetName2 ]
+
+  publicRT2:
+    Type: AWS::EC2::RouteTable
+    DependsOn: 
+      - AttachGateway2
+    Properties:
+      VpcId: !Ref VPC2
+      Tags:
+      - Key: Name
+        Value: !FindInMap [ VPCmapping, !Ref "AWS::Region", publicRT2 ]
+
+  PublicRoute2:
+    Type: AWS::EC2::Route
+    DependsOn: 
+      - AttachGateway2
+    Properties:
+      RouteTableId: !Ref publicRT2
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway2
+
+  PrivateSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC2
+      CidrBlock: !FindInMap [ VPCmapping, !Ref "AWS::Region", privateSubnetCidr2 ]
+      AvailabilityZone: !Select
+        - '0'
+        - !GetAZs ''
+      Tags:
+        - Key: Name
+          Value: !FindInMap [ VPCmapping, !Ref "AWS::Region", privateSubnetName2 ]
+
+  ElasticIPAddress2:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NATGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt ElasticIPAddress2.AllocationId
+      SubnetId: !Ref PublicSubnet2
+      Tags:
+      - Key: Name
+        Value: VPC2-NatGateway-for-PrivateSubnet
+
+  PrivateRT2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC2
+      Tags:
+      - Key: Name
+        Value: !FindInMap [ VPCmapping, !Ref "AWS::Region", privateRT2 ]
+
+  PrivateRoute2:   # Private route table can access web via NAT
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRT2
+      DestinationCidrBlock: 0.0.0.0/0
+      # Route traffic through the NAT Gateway:
+      NatGatewayId: !Ref NATGateway2
+
+  PublicRouteAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref publicRT2
+
+  PrivateRouteAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRT2
+
+  SecurityGroup2:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security Group for EC2Instance
+      VpcId: !Ref VPC2
+      Tags:
+        - Key: Name
+          Value: !FindInMap [ VPCmapping, !Ref "AWS::Region", securityGroup2 ]
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0               
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  SecondEC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !Ref AWSAmiId
+      InstanceType: t3.micro
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          AssociatePublicIpAddress: false
+          SubnetId: !Ref PrivateSubnet2
+          GroupSet:
+            - !Ref SecurityGroup2
+      Tags:
+        - Key: Name
+          Value: !FindInMap [ VPCmapping, !Ref "AWS::Region", 2server1 ]
+
+  VPC3:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: !FindInMap [ VPCmapping, !Ref "AWS::Region", cidr3 ]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !FindInMap [ VPCmapping, !Ref "AWS::Region", Name3 ]
+
+  InternetGateway3:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC3
+    Properties:
+      Tags:
+        - Key: Name
+          Value: VPC3-internet-gateway
+
+  AttachGateway3:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC3
+      InternetGatewayId: !Ref InternetGateway3
+
+  PublicSubnet3:
+    Type: AWS::EC2::Subnet
+    DependsOn: AttachGateway3
+    Properties:
+      VpcId: !Ref VPC3
+      CidrBlock: !FindInMap [ VPCmapping, !Ref "AWS::Region", publicSubnetCidr3 ]
+      AvailabilityZone: !Select [ 1, !GetAZs ]       
+      Tags:
+      - Key: Name
+        Value: !FindInMap [ VPCmapping, !Ref "AWS::Region", publicSubnetName3 ]
+
+  publicRT3:
+    Type: AWS::EC2::RouteTable
+    DependsOn: 
+      - AttachGateway3
+    Properties:
+      VpcId: !Ref VPC3
+      Tags:
+      - Key: Name
+        Value: !FindInMap [ VPCmapping, !Ref "AWS::Region", publicRT3 ]
+
+  PublicRoute3:
+    Type: AWS::EC2::Route
+    DependsOn: 
+      - AttachGateway3
+    Properties:
+      RouteTableId: !Ref publicRT3
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway3
+
+  PublicRouteAssociation3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet3
+      RouteTableId: !Ref publicRT3
+
+  SecurityGroup3:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security Group for EC2Instance
+      VpcId: !Ref VPC3
+      Tags:
+        - Key: Name
+          Value: !FindInMap [ VPCmapping, !Ref "AWS::Region", securityGroup3 ]
+      SecurityGroupEgress:
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: udp
+          FromPort: 49421
+          ToPort: 49421
+          CidrIp: 0.0.0.0/0     
+      SecurityGroupIngress:
+        - IpProtocol: icmp
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: udp
+          FromPort: 49421
+          ToPort: 49421
+          CidrIp: 0.0.0.0/0
+
+  ThirdEC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: !Ref AWSAmiId
+      InstanceType: t3.micro
+      NetworkInterfaces:
+        - DeviceIndex: '0'
+          AssociatePublicIpAddress: true
+          SubnetId: !Ref PublicSubnet3
+          GroupSet:
+            - !Ref SecurityGroup3
+      Tags:
+        - Key: Name
+          Value: !FindInMap [ VPCmapping, !Ref "AWS::Region", 3server2 ]
+
+  # ReadOnlyGroup:
+  #   Type: AWS::IAM::Group
+  #   Properties:
+  #     ManagedPolicyArns:
+  #       - arn:aws:iam::aws:policy/ReadOnlyAccess
+
+Outputs:
+  VPC1:
+    Description: VPC1 ID
+    Value: !Ref VPC
+  VPC2:
+    Description: VPC2 ID
+    Value: !Ref VPC2
+  VPC3:
+    Description: VPC3 ID
+    Value: !Ref VPC3
